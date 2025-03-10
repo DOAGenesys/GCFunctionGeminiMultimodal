@@ -1,4 +1,4 @@
-# Genesys Cloud Function for Google Gemini Controlled Generation
+# Genesys Cloud Function for Google Gemini file analysis (BYOLLM)
 
 This Genesys Cloud Function integrates Gemini multimodal LLMs, processing files (PDF, image, or audio) either from provided URLs or directly from Genesys Cloud conversations, uploading them to Google Gemini via a resumable upload, and then calling the Gemini API to generate content based on a user prompt. The function supports controlled generation, allowing you to guarantee that the model's generated output adheres to a specific JSON schema.
 
