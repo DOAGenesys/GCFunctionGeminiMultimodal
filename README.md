@@ -131,7 +131,7 @@ The flow demonstrates how to:
 
 This practical example shows how the function can be used to automate the processing of utility meter readings from customer-uploaded images.
 
-## Genesys Cloud Function Properties
+## Genesys Cloud Function Creation
 
 ### Request Body Template
 ```velocity
