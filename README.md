@@ -76,7 +76,7 @@ Example configuration from the digital bot flow:
 ```json
 {
   "isJsonResponse": true,
-  "responseSchema": "{\"type\": \"OBJECT\", \"properties\": {\"powerConsumption\": {\"type\": \"NUMBER\"}}}",
+  "responseSchema": "{"type": "OBJECT", "properties": {"powerConsumption": {"type": "NUMBER"}}}",
   "system_message": "Your task is to return a JSON object with the exact structure defined in the response schema"
 }
 ```
@@ -343,7 +343,7 @@ To request a structured JSON response:
   "user_message": "Extract the invoice total and date from this document",
   "system_message": "Return a structured JSON with the exact format specified in the schema",
   "isJsonResponse": true,
-  "responseSchema": "{\"type\": \"OBJECT\", \"properties\": {\"invoiceTotal\": {\"type\": \"NUMBER\"}, \"invoiceDate\": {\"type\": \"STRING\"}}}",
+  "responseSchema": "{"type": "OBJECT", "properties": {"invoiceTotal": {"type": "NUMBER"}, "invoiceDate": {"type": "STRING"}}}",
   "temperature": 0.2,
   "max_tokens": 2048
 }
