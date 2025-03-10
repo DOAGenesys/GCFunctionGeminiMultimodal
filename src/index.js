@@ -19,6 +19,8 @@
  *   - max_tokens:        integer, optional maximum output tokens (defaults to 1024)
  *   - isJsonResponse:    boolean, optional flag to request a controlled JSON response
  *   - responseSchema:    string, optional JSON string defining the response schema for controlled generation
+ *   - conversationId:    string, conversation ID to fetch the last customer media file (optional, but mandatory if processLastConversationFile is true)
+ *   - processLastConversationFile: boolean, flag indicating if the last conversation file should be processed (mandatory)
  *
  * Additionally, for Genesys Cloud stored files, the download URL is of the form:
  *   https://api-downloads.mypurecloud.de/api/v2/downloads/<downloadId>
@@ -33,7 +35,8 @@ const inputSchema = {
   "$schema": "http://json-schema.org/draft-04/schema#",
   "type": "object",
   "required": [
-    "user_message"
+    "user_message",
+    "processLastConversationFile"
   ],
   "properties": {
     "pdfDownloadUrl": {
@@ -78,6 +81,14 @@ const inputSchema = {
     "responseSchema": {
       "description": "A JSON string defining the response schema for controlled generation",
       "type": "string"
+    },
+    "conversationId": {
+      "description": "Conversation ID to fetch the last customer media file",
+      "type": "string"
+    },
+    "processLastConversationFile": {
+      "description": "Flag indicating if the last conversation file should be processed",
+      "type": "boolean"
     }
   }
 };
@@ -151,6 +162,10 @@ function validateInput(data) {
         return `Property '${propertyName}' should be a boolean`;
       }
     }
+  }
+  // If processLastConversationFile is true, conversationId becomes mandatory.
+  if (data.processLastConversationFile === true && !data.conversationId) {
+    return "Missing required property: conversationId when processLastConversationFile is true";
   }
   return null;
 }
@@ -300,6 +315,33 @@ async function uploadFile(fileBytes, mimeType, displayName, googleApiKey) {
   return fileUri;
 }
 
+/**
+ * Helper function to obtain a Genesys Cloud OAuth token given a domain and credentials.
+ */
+async function getGenesysCloudToken(domain, credentials) {
+  const gcClientId = credentials?.gcClientId;
+  const gcClientSecret = credentials?.gcClientSecret;
+  if (!gcClientId || !gcClientSecret) {
+    throw new Error("Missing gcClientId or gcClientSecret in headers or clientContext for Genesys Cloud API call.");
+  }
+  const tokenUrl = `https://login.${domain}/oauth/token`;
+  try {
+    const tokenResp = await axios.post(tokenUrl, null, {
+      params: { grant_type: "client_credentials" },
+      headers: {
+        "Authorization": "Basic " + Buffer.from(`${gcClientId}:${gcClientSecret}`).toString('base64')
+      }
+    });
+    const accessToken = tokenResp.data.access_token;
+    if (!accessToken) {
+      throw new Error("Failed to obtain access token from Genesys Cloud.");
+    }
+    return accessToken;
+  } catch (err) {
+    throw new Error("Failed to obtain Genesys Cloud OAuth token: " + err.message);
+  }
+}
+
 exports.handler = async (event, context, callback) => {
   console.log("## Context: " + JSON.stringify(context));
   console.log("## Event: " + JSON.stringify(event));
@@ -350,6 +392,8 @@ exports.handler = async (event, context, callback) => {
     const userPrompt = payload.user_message || "";
     const temperature = (payload.temperature !== undefined) ? payload.temperature : 0.3;
     const maxTokens = (payload.max_tokens !== undefined) ? payload.max_tokens : 1024;
+    const conversationId = payload.conversationId;
+    const processLastConversationFile = payload.processLastConversationFile;
 
     // Retrieve Google API Key from clientContext
     const googleApiKey = context.clientContext?.googleApiKey;
@@ -364,90 +408,189 @@ exports.handler = async (event, context, callback) => {
     // 2) Download and upload files for each modality
     const fileUploads = [];
 
-    // Process PDF if provided
-    if (pdfDownloadUrl) {
-      let pdfBytes;
+    if (processLastConversationFile) {
+      // Process file from the most recent customer message in the conversation
+      const conversationUrl = `https://api.mypurecloud.de/api/v2/conversations/messages/${conversationId}`;
+      let accessToken;
       try {
-        pdfBytes = await fetchFile(pdfDownloadUrl, 'pdf', gcCredentials);
+        accessToken = await getGenesysCloudToken("mypurecloud.de", gcCredentials);
       } catch (err) {
-        console.error("Error fetching PDF:", err.message);
+        console.error("Error obtaining Genesys Cloud token for conversation fetch:", err.message);
         const errorResponse = formatOutput({
           status: 400,
-          message: "Failed to download PDF",
+          message: "Failed to obtain Genesys Cloud token for conversation fetch",
+          detail: err.message
+        });
+        return callback(null, errorResponse);
+      }
+      let conversationResp;
+      try {
+        conversationResp = await axios.get(conversationUrl, {
+          headers: {
+            "Authorization": `Bearer ${accessToken}`,
+            "Content-Type": "application/json"
+          },
+          responseType: "json"
+        });
+      } catch (err) {
+        console.error("Error fetching conversation messages:", err.message);
+        const errorResponse = formatOutput({
+          status: err.response?.status || 400,
+          message: "Failed to fetch conversation messages",
+          detail: err.response?.data || err.message
+        });
+        return callback(null, errorResponse);
+      }
+      let fileMedia = null;
+      let latestMessageTime = null;
+      if (conversationResp.data && Array.isArray(conversationResp.data.participants)) {
+        const customerParticipants = conversationResp.data.participants.filter(p => p.purpose === "customer");
+        for (const participant of customerParticipants) {
+          if (participant.messages && Array.isArray(participant.messages)) {
+            for (const message of participant.messages) {
+              if (message.media && Array.isArray(message.media) && message.media.length > 0) {
+                const msgTime = new Date(message.messageTime);
+                if (!latestMessageTime || msgTime > latestMessageTime) {
+                  latestMessageTime = msgTime;
+                  fileMedia = message.media[0];
+                }
+              }
+            }
+          }
+        }
+      }
+      if (!fileMedia) {
+        const errorResponse = formatOutput({
+          status: 400,
+          message: "No media file found in the most recent customer message for the conversation"
+        });
+        return callback(null, errorResponse);
+      }
+      const mediaUrl = fileMedia.url;
+      const mediaType = fileMedia.mediaType || "";
+      const displayName = fileMedia.name || "GenesysMedia";
+      let fileType;
+      if (mediaType.startsWith("image/")) {
+        fileType = "image";
+      } else if (mediaType.startsWith("audio/")) {
+        fileType = "audio";
+      } else if (mediaType === "application/pdf") {
+        fileType = "pdf";
+      } else {
+        fileType = "image"; // default fallback
+      }
+      let mediaBytes;
+      try {
+        mediaBytes = await fetchFile(mediaUrl, fileType, gcCredentials);
+      } catch (err) {
+        console.error("Error fetching media file from conversation:", err.message);
+        const errorResponse = formatOutput({
+          status: 400,
+          message: "Failed to download media file from conversation",
           detail: err.message
         });
         return callback(null, errorResponse);
       }
       try {
-        const mimeType = guessMimeType(pdfDownloadUrl, 'pdf');
-        const fileUri = await uploadFile(pdfBytes, mimeType, "GenesysPDF", googleApiKey);
-        fileUploads.push({ modality: "pdf", file_uri: fileUri, mime_type: mimeType });
+        const fileUri = await uploadFile(mediaBytes, mediaType, displayName, googleApiKey);
+        fileUploads.push({ modality: fileType, file_uri: fileUri, mime_type: mediaType });
       } catch (err) {
-        console.error("Error uploading PDF:", err.message);
+        console.error("Error uploading media file from conversation:", err.message);
         const errorResponse = formatOutput({
           status: err.response?.status || 400,
-          message: "Failed to upload PDF",
+          message: "Failed to upload media file from conversation",
           detail: err.message
         });
         return callback(null, errorResponse);
       }
-    }
+    } else {
+      // Existing logic: Process provided file URLs
 
-    // Process Image if provided
-    if (imageDownloadUrl) {
-      let imageBytes;
-      try {
-        imageBytes = await fetchFile(imageDownloadUrl, 'image', gcCredentials);
-      } catch (err) {
-        console.error("Error fetching image:", err.message);
-        const errorResponse = formatOutput({
-          status: 400,
-          message: "Failed to download image",
-          detail: err.message
-        });
-        return callback(null, errorResponse);
+      // Process PDF if provided
+      if (pdfDownloadUrl) {
+        let pdfBytes;
+        try {
+          pdfBytes = await fetchFile(pdfDownloadUrl, 'pdf', gcCredentials);
+        } catch (err) {
+          console.error("Error fetching PDF:", err.message);
+          const errorResponse = formatOutput({
+            status: 400,
+            message: "Failed to download PDF",
+            detail: err.message
+          });
+          return callback(null, errorResponse);
+        }
+        try {
+          const mimeType = guessMimeType(pdfDownloadUrl, 'pdf');
+          const fileUri = await uploadFile(pdfBytes, mimeType, "GenesysPDF", googleApiKey);
+          fileUploads.push({ modality: "pdf", file_uri: fileUri, mime_type: mimeType });
+        } catch (err) {
+          console.error("Error uploading PDF:", err.message);
+          const errorResponse = formatOutput({
+            status: err.response?.status || 400,
+            message: "Failed to upload PDF",
+            detail: err.message
+          });
+          return callback(null, errorResponse);
+        }
       }
-      try {
-        const mimeType = guessMimeType(imageDownloadUrl, 'image');
-        const fileUri = await uploadFile(imageBytes, mimeType, "GenesysImage", googleApiKey);
-        fileUploads.push({ modality: "image", file_uri: fileUri, mime_type: mimeType });
-      } catch (err) {
-        console.error("Error uploading image:", err.message);
-        const errorResponse = formatOutput({
-          status: err.response?.status || 400,
-          message: "Failed to upload image",
-          detail: err.message
-        });
-        return callback(null, errorResponse);
-      }
-    }
 
-    // Process Audio if provided
-    if (audioDownloadUrl) {
-      let audioBytes;
-      try {
-        audioBytes = await fetchFile(audioDownloadUrl, 'audio', gcCredentials);
-      } catch (err) {
-        console.error("Error fetching audio:", err.message);
-        const errorResponse = formatOutput({
-          status: 400,
-          message: "Failed to download audio",
-          detail: err.message
-        });
-        return callback(null, errorResponse);
+      // Process Image if provided
+      if (imageDownloadUrl) {
+        let imageBytes;
+        try {
+          imageBytes = await fetchFile(imageDownloadUrl, 'image', gcCredentials);
+        } catch (err) {
+          console.error("Error fetching image:", err.message);
+          const errorResponse = formatOutput({
+            status: 400,
+            message: "Failed to download image",
+            detail: err.message
+          });
+          return callback(null, errorResponse);
+        }
+        try {
+          const mimeType = guessMimeType(imageDownloadUrl, 'image');
+          const fileUri = await uploadFile(imageBytes, mimeType, "GenesysImage", googleApiKey);
+          fileUploads.push({ modality: "image", file_uri: fileUri, mime_type: mimeType });
+        } catch (err) {
+          console.error("Error uploading image:", err.message);
+          const errorResponse = formatOutput({
+            status: err.response?.status || 400,
+            message: "Failed to upload image",
+            detail: err.message
+          });
+          return callback(null, errorResponse);
+        }
       }
-      try {
-        const mimeType = guessMimeType(audioDownloadUrl, 'audio');
-        const fileUri = await uploadFile(audioBytes, mimeType, "GenesysAudio", googleApiKey);
-        fileUploads.push({ modality: "audio", file_uri: fileUri, mime_type: mimeType });
-      } catch (err) {
-        console.error("Error uploading audio:", err.message);
-        const errorResponse = formatOutput({
-          status: err.response?.status || 400,
-          message: "Failed to upload audio",
-          detail: err.message
-        });
-        return callback(null, errorResponse);
+
+      // Process Audio if provided
+      if (audioDownloadUrl) {
+        let audioBytes;
+        try {
+          audioBytes = await fetchFile(audioDownloadUrl, 'audio', gcCredentials);
+        } catch (err) {
+          console.error("Error fetching audio:", err.message);
+          const errorResponse = formatOutput({
+            status: 400,
+            message: "Failed to download audio",
+            detail: err.message
+          });
+          return callback(null, errorResponse);
+        }
+        try {
+          const mimeType = guessMimeType(audioDownloadUrl, 'audio');
+          const fileUri = await uploadFile(audioBytes, mimeType, "GenesysAudio", googleApiKey);
+          fileUploads.push({ modality: "audio", file_uri: fileUri, mime_type: mimeType });
+        } catch (err) {
+          console.error("Error uploading audio:", err.message);
+          const errorResponse = formatOutput({
+            status: err.response?.status || 400,
+            message: "Failed to upload audio",
+            detail: err.message
+          });
+          return callback(null, errorResponse);
+        }
       }
     }
 
