@@ -30,7 +30,7 @@ The function performs the following steps:
 
 ## Conversation File Processing
 
-The function now supports retrieving and processing media files directly from Genesys Cloud conversations:
+The function supports retrieving and processing media files directly from Genesys Cloud conversations:
 
 - When `processLastConversationFile` is set to `true`, the function will:
   - Use the provided `conversationId` to fetch conversation messages
