@@ -2,13 +2,16 @@
 
 This Genesys Cloud Function integrates Gemini multimodal LLMs, processing files (PDF, image, or audio) either from provided URLs or directly from Genesys Cloud conversations, uploading them to Google Gemini via a resumable upload, and then calling the Gemini API to generate content based on a user prompt. The function supports controlled generation, allowing you to guarantee that the model's generated output adheres to a specific JSON schema. Thanks to this function, it's possible to analyze attachments provided during a messaging conversation. The goal is to enable nobel new use cases like the one depicted on "example use case.png":
 
+
+
 ![image](https://github.com/user-attachments/assets/fcc9decf-f127-4bfe-9d0b-24c4d50409f9)
+
 
 
 This far exceeds classic OCR analysis:
 
 - Much greater cost efficiency.
-- genAI powered. You can prompt the LLM to do any analysis you can think of, and enforce it to return a structured output (JSON).
+- genAI powered. You can prompt the LLM to do any analysis you can think of, and enforce it to return an structured output (JSON).
 - Multimodal: PDF, image, audio. 
 
 ## Overview
