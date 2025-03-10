@@ -288,6 +288,7 @@ googleApiKey=${credentials.Gemini_API_Key}
 - **HTTP Method:** POST
 - **Timeout:** 15 seconds
 - **Runtime:** `nodejs22.x`
+- Upload the function.zip in this repo.
 
 ## Usage Examples
 
