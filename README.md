@@ -1,6 +1,6 @@
 # Genesys Cloud Function for Google Gemini Controlled Generation
 
-This Genesys Cloud Function integrates Gemini multimodal LLMs, processing files (PDF, image, or audio) either from provided URLs or directly from Genesys Cloud conversations, uploading them to Google Gemini via a resumable upload, and then calling the Gemini API to generate content based on a user prompt. The function supports controlled generation—allowing you to guarantee that the model's generated output adheres to a specific JSON schema—and trims any extra whitespace from JSON responses.
+This Genesys Cloud Function integrates Gemini multimodal LLMs, processing files (PDF, image, or audio) either from provided URLs or directly from Genesys Cloud conversations, uploading them to Google Gemini via a resumable upload, and then calling the Gemini API to generate content based on a user prompt. The function supports controlled generation, allowing you to guarantee that the model's generated output adheres to a specific JSON schema.
 
 ## Overview
 
@@ -43,6 +43,81 @@ The function now supports retrieving and processing media files directly from Ge
   - Process these files as before
 
 This feature enables seamless integration with customer-uploaded files in Genesys Cloud conversations, eliminating the need to manually extract and provide file URLs.
+
+## Enforcing and Processing JSON Responses
+
+The function supports controlled generation of structured JSON responses from Gemini, which is particularly useful for:
+
+- Extracting specific data points from documents or images
+- Ensuring consistent output formats for downstream processing
+- Building deterministic automation workflows based on AI responses
+
+### How to Enforce JSON Output
+
+To enforce JSON output from the Gemini API:
+
+1. Set `isJsonResponse: true` in your request
+2. Provide a valid JSON schema in the `responseSchema` parameter
+3. Optionally include a guiding `system_message` that instructs the model about the desired output format
+
+Example configuration from the digital bot flow:
+```json
+{
+  "isJsonResponse": true,
+  "responseSchema": "{\"type\": \"OBJECT\", \"properties\": {\"powerConsumption\": {\"type\": \"NUMBER\"}}}",
+  "system_message": "Your task is to return a JSON object with the exact structure defined in the response schema"
+}
+```
+
+### Processing JSON Responses in Architect Flows
+
+The "Gemini multimodal" digital bot flow demonstrates how to process JSON responses:
+
+1. **Capture the JSON response string**: 
+   - The raw text output from Gemini is stored in a flow variable (e.g., `Flow.AIResponse`)
+
+2. **Parse the JSON string into an object**:
+   ```
+   Flow.AIResponseJSON = JsonParse(Flow.AIResponse)
+   ```
+
+3. **Extract specific properties** from the parsed JSON:
+   ```
+   Flow.powerConsumptionReading = ToString(GetJsonObjectProperty(Flow.AIResponseJSON, "powerConsumption"))
+   ```
+
+4. **Use the extracted values** in your flow:
+   ```
+   "Your reading is *" + Flow.powerConsumptionReading + "*. We have successfully updated our systems."
+   ```
+
+This approach allows you to reliably extract structured data from unstructured content like images, PDFs, or free-form user inputs, enabling robust automation of complex tasks.
+
+## Credential Requirements
+
+Make sure your Genesys Cloud function integration has at least these 3 credentials set:
+
+- **GC_Client_Id**: Genesys Cloud OAuth client credentials ID
+- **GC_Client_Secret**: Genesys Cloud OAuth client credentials secret
+- **Gemini_API_Key**: API key obtained from [Google AI Studio](https://aistudio.google.com)
+
+These credentials are essential for authenticating with both Genesys Cloud and Google Gemini services.
+
+## Digital Bot Flow Integration
+
+"Gemini multimodal_v9-0.i3DigitalBotFlow" is a Genesys Cloud digital bot flow that leverages this function to showcase its potential use cases. 
+
+Use this flow in conjunction with the "power meter picture.png" sample, and you should be able to replicate the use case depicted in "example use case.png".
+
+The flow demonstrates how to:
+1. Present a menu of options to users
+2. Request and capture an image upload (meter reading)
+3. Call the Gemini function with the uploaded image
+4. Parse the resulting JSON response
+5. Extract the power consumption reading
+6. Provide a confirmation message to the user
+
+This practical example shows how the function can be used to automate the processing of utility meter readings from customer-uploaded images.
 
 ## Genesys Cloud Function Properties
 
@@ -240,6 +315,23 @@ To process a file from a provided URL:
   "pdfDownloadUrl": "https://example.com/sample.pdf",
   "user_message": "Summarize this document",
   "temperature": 0.3,
+  "max_tokens": 2048
+}
+```
+
+### Enforcing JSON Response with Schema
+To request a structured JSON response:
+```json
+{
+  "provider": "Google",
+  "model": "gemini-2.0-flash-exp",
+  "processLastConversationFile": true,
+  "conversationId": "12345678-abcd-1234-efgh-1234567890ab",
+  "user_message": "Extract the invoice total and date from this document",
+  "system_message": "Return a structured JSON with the exact format specified in the schema",
+  "isJsonResponse": true,
+  "responseSchema": "{\"type\": \"OBJECT\", \"properties\": {\"invoiceTotal\": {\"type\": \"NUMBER\"}, \"invoiceDate\": {\"type\": \"STRING\"}}}",
+  "temperature": 0.2,
   "max_tokens": 2048
 }
 ```
