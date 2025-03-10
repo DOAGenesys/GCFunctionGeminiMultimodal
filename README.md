@@ -12,7 +12,9 @@ This far exceeds classic OCR analysis:
 
 - Much greater cost efficiency.
 - genAI powered. You can prompt the LLM to do any analysis you can think of, and enforce it to return an structured output (JSON).
-- Multimodal: PDF, image, audio. 
+- Multimodal: PDF, image, audio.
+
+In the documentation below you will find the steps to create the GC Function, and a digital bot flow leveraging that function, on your org.
 
 ## Overview
 
