@@ -1,6 +1,6 @@
 # Genesys Cloud Function for Google Gemini file analysis (BYOLLM)
 
-This Genesys Cloud Function integrates Gemini multimodal LLMs, processing files (PDF, image, or audio) either from provided URLs or directly from Genesys Cloud conversations, uploading them to Google Gemini via a resumable upload, and then calling the Gemini API to generate content based on a user prompt. The function supports controlled generation, allowing you to guarantee that the model's generated output adheres to a specific JSON schema. Thanks to this function, it's possible to analyze attachments provided during a messaging conversation. The goal is to enable nobel new use cases like the one depicted on "example use case.png":
+This Genesys Cloud Function integrates Gemini multimodal LLMs, processing files (PDF, image, or audio) either from provided URLs or directly from Genesys Cloud conversations, uploading them to Google Gemini via a resumable upload, and then calling the Gemini API to generate content based on a user prompt. The function supports controlled generation, allowing you to guarantee that the model's generated output adheres to a specific JSON schema. Thanks to this function, it's possible to analyze attachments provided during a messaging conversation. The goal is to enable novel new use cases like the one depicted on "example use case.png":
 
 
 
