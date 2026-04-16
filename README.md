@@ -190,9 +190,7 @@ This practical example shows how the function can be used to automate the proces
       "enum": [
         "gemini-3.1-pro-preview",
         "gemini-3-flash-preview",
-        "gemini-3.1-flash-lite-preview",
-        "gemini-3-pro-image-preview",
-        "gemini-3.1-flash-image-preview"
+        "gemini-3.1-flash-lite-preview"
       ],
       "default": "gemini-3-flash-preview"
     },
