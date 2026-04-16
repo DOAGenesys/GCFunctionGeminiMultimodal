@@ -12,11 +12,13 @@
  *   - pdfDownloadUrl:    string, public URL to a PDF to be downloaded (optional)
  *   - imageDownloadUrl:  string, public URL to an image to be downloaded (optional)
  *   - audioDownloadUrl:  string, public URL to an audio file to be downloaded (optional)
- *   - model:             string, e.g. "gemini-1.5-flash" (optional, defaults to gemini-2.0-flash-exp)
+ *   - model:             string, e.g. "gemini-3.1-pro-preview" (optional, defaults to gemini-3-flash-preview)
  *   - system_message:    string, optional system instruction for Gemini
  *   - user_message:      string, user's text prompt for Gemini (required)
- *   - temperature:       number, optional generation temperature (defaults to 0.3)
+ *   - temperature:       number, optional generation temperature (defaults to 1.0 for Gemini 3)
  *   - max_tokens:        integer, optional maximum output tokens (defaults to 1024)
+ *   - thinkingLevel:     string, optional thinking level (minimal, low, medium, high)
+ *   - mediaResolution:   string, optional media resolution for images (e.g. media_resolution_high)
  *   - isJsonResponse:    boolean, optional flag to request a controlled JSON response
  *   - responseSchema:    string, optional JSON string defining the response schema for controlled generation
  *   - conversationId:    string, conversation ID to fetch the last customer media file (optional, but mandatory if processLastConversationFile is true)
@@ -53,7 +55,7 @@ const inputSchema = {
     },
     "model": {
       "description": "The Google Gemini model to use",
-      "default": "gemini-2.0-flash-exp",
+      "default": "gemini-3-flash-preview",
       "type": "string"
     },
     "system_message": {
@@ -65,9 +67,17 @@ const inputSchema = {
       "type": "string"
     },
     "temperature": {
-      "description": "Optional generation temperature",
+      "description": "Optional generation temperature (default 1.0 recommended for Gemini 3)",
       "type": "number",
-      "default": 0.3
+      "default": 1.0
+    },
+    "thinkingLevel": {
+      "description": "Thinking level for Gemini 3 (minimal, low, medium, high)",
+      "type": "string"
+    },
+    "mediaResolution": {
+      "description": "Media resolution for vision tasks (media_resolution_low, media_resolution_medium, media_resolution_high, media_resolution_ultra_high)",
+      "type": "string"
     },
     "max_tokens": {
       "description": "Optional maximum number of tokens to generate in response",
@@ -117,6 +127,10 @@ const outputSchema = {
     },
     "textOutput": {
       "description": "The text output extracted from the Gemini response",
+      "type": "string"
+    },
+    "thoughtSignature": {
+      "description": "Encrypted representation of the model's internal thought process (Gemini 3).",
       "type": "string"
     },
     "finishReason": {
@@ -387,11 +401,13 @@ exports.handler = async (event, context, callback) => {
     const pdfDownloadUrl = payload.pdfDownloadUrl;
     const imageDownloadUrl = payload.imageDownloadUrl;
     const audioDownloadUrl = payload.audioDownloadUrl;
-    const model = payload.model || "gemini-2.0-flash-exp";
+    const model = payload.model || "gemini-3-flash-preview";
     const systemText = payload.system_message || "";
     const userPrompt = payload.user_message || "";
-    const temperature = (payload.temperature !== undefined) ? payload.temperature : 0.3;
+    const temperature = (payload.temperature !== undefined) ? payload.temperature : 1.0;
     const maxTokens = (payload.max_tokens !== undefined) ? payload.max_tokens : 1024;
+    const thinkingLevel = payload.thinkingLevel;
+    const mediaResolution = payload.mediaResolution;
     const conversationId = payload.conversationId;
     const processLastConversationFile = payload.processLastConversationFile;
 
@@ -603,21 +619,25 @@ exports.handler = async (event, context, callback) => {
       if (userPrompt) {
         parts.push({ text: userPrompt });
       }
-      parts.push({
+      const filePart = {
         file_data: {
           mime_type: fileUploads[0].mime_type,
           file_uri: fileUploads[0].file_uri
         }
-      });
+      };
+      if (mediaResolution) filePart.mediaResolution = { level: mediaResolution };
+      parts.push(filePart);
     } else {
       // For multiple files or non-PDF modalities, add file parts first then text prompt.
       for (const upload of fileUploads) {
-        parts.push({
+        const filePart = {
           file_data: {
             mime_type: upload.mime_type,
             file_uri: upload.file_uri
           }
-        });
+        };
+        if (mediaResolution) filePart.mediaResolution = { level: mediaResolution };
+        parts.push(filePart);
       }
       if (userPrompt) {
         parts.push({ text: userPrompt });
@@ -633,7 +653,8 @@ exports.handler = async (event, context, callback) => {
       ],
       generationConfig: {
         temperature: temperature,
-        maxOutputTokens: maxTokens
+        maxOutputTokens: maxTokens,
+        ...(thinkingLevel && { thinkingConfig: { thinkingLevel } })
       }
     };
 
@@ -660,10 +681,11 @@ exports.handler = async (event, context, callback) => {
       }
     }
 
+    const apiVersion = mediaResolution ? "v1alpha" : "v1beta";
     let geminiResp;
     try {
       geminiResp = await axios.post(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${googleApiKey}`,
+        `https://generativelanguage.googleapis.com/${apiVersion}/models/${model}:generateContent?key=${googleApiKey}`,
         requestBody,
         {
           headers: { "Content-Type": "application/json" },
@@ -687,6 +709,8 @@ exports.handler = async (event, context, callback) => {
     if (payload.isJsonResponse) {
       textOutput = textOutput.trim();
     }
+    // Extract thoughtSignature if available (Gemini 3 feature)
+    const thoughtSignature = data?.candidates?.[0]?.content?.parts?.find(p => p.thoughtSignature)?.thoughtSignature || "";
     const usage = data?.usageMetadata || {};
     const finishReason = data?.candidates?.[0]?.finishReason || "";
 
@@ -695,6 +719,7 @@ exports.handler = async (event, context, callback) => {
       message: "success",
       geminiResponse: data,
       textOutput,
+      thoughtSignature,
       finishReason,
       usage
     });

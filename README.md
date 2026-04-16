@@ -1,6 +1,6 @@
 # Genesys Cloud Function for Google Gemini file analysis (BYOLLM)
 
-This Genesys Cloud Function integrates Gemini multimodal LLMs, processing files (PDF, image, or audio) either from provided URLs or directly from Genesys Cloud conversations, uploading them to Google Gemini via a resumable upload, and then calling the Gemini API to generate content based on a user prompt. The function supports controlled generation, allowing you to guarantee that the model's generated output adheres to a specific JSON schema. Thanks to this function, it's possible to analyze attachments provided during a messaging conversation. The goal is to enable novel new use cases like the one depicted on "example use case.png":
+This Genesys Cloud Function integrates Gemini multimodal LLMs, processing files (PDF, image, or audio) either from provided URLs or directly from Genesys Cloud conversations, uploading them to Google Gemini via a resumable upload, and then calling the Gemini API to generate content based on a user prompt. **This code is fully optimized for the Gemini 3.0 and 3.1 model families**, natively supporting their new features like dynamic thinking levels, granular media configurations, and thought signatures. The function also supports controlled generation, allowing you to guarantee that the model's generated output adheres to a specific JSON schema. Thanks to this function, it's possible to analyze attachments provided during a messaging conversation. The goal is to enable novel new use cases like the one depicted on "example use case.png":
 
 
 
@@ -141,7 +141,7 @@ This practical example shows how the function can be used to automate the proces
   "provider": "${input.provider}",
   "model": "${input.model}",
   "processLastConversationFile": ${input.processLastConversationFile},
-  "user_message": "$esc.jsonEncode(${input.user_message})"#if("$!{input.pdfDownloadUrl}" != "") , "pdfDownloadUrl": "${input.pdfDownloadUrl}"#end#if("$!{input.imageDownloadUrl}" != "") , "imageDownloadUrl": "${input.imageDownloadUrl}"#end#if("$!{input.audioDownloadUrl}" != "") , "audioDownloadUrl": "${input.audioDownloadUrl}"#end#if("$!{input.conversationId}" != "") , "conversationId": "${input.conversationId}"#end#if("$!{input.temperature}" != "") , "temperature": ${input.temperature}#end#if("$!{input.max_tokens}" != "") , "max_tokens": ${input.max_tokens}#end#if("$!{input.system_message}" != "") , "system_message": "$esc.jsonEncode(${input.system_message})"#end#if("$!{input.isJsonResponse}" != "") , "isJsonResponse": ${input.isJsonResponse}#end#if("$!{input.responseSchema}" != "") , "responseSchema": "$esc.jsonEncode(${input.responseSchema})"#end
+  "user_message": "$esc.jsonEncode(${input.user_message})"#if("$!{input.pdfDownloadUrl}" != "") , "pdfDownloadUrl": "${input.pdfDownloadUrl}"#end#if("$!{input.imageDownloadUrl}" != "") , "imageDownloadUrl": "${input.imageDownloadUrl}"#end#if("$!{input.audioDownloadUrl}" != "") , "audioDownloadUrl": "${input.audioDownloadUrl}"#end#if("$!{input.conversationId}" != "") , "conversationId": "${input.conversationId}"#end#if("$!{input.temperature}" != "") , "temperature": ${input.temperature}#end#if("$!{input.max_tokens}" != "") , "max_tokens": ${input.max_tokens}#end#if("$!{input.thinkingLevel}" != "") , "thinkingLevel": "${input.thinkingLevel}"#end#if("$!{input.mediaResolution}" != "") , "mediaResolution": "${input.mediaResolution}"#end#if("$!{input.system_message}" != "") , "system_message": "$esc.jsonEncode(${input.system_message})"#end#if("$!{input.isJsonResponse}" != "") , "isJsonResponse": ${input.isJsonResponse}#end#if("$!{input.responseSchema}" != "") , "responseSchema": "$esc.jsonEncode(${input.responseSchema})"#end
 }
 ```
 
@@ -186,12 +186,15 @@ This practical example shows how the function can be used to automate the proces
     },
     "model": {
       "type": "string",
-      "description": "Model identifier (e.g., gemini-2.0-flash-exp)",
+      "description": "Model identifier (e.g., gemini-3.1-pro-preview)",
       "enum": [
-        "gemini-2.0-flash-exp",
-        "gemini-2.0-pro-exp-02-05"
+        "gemini-3.1-pro-preview",
+        "gemini-3-flash-preview",
+        "gemini-3.1-flash-lite-preview",
+        "gemini-3-pro-image-preview",
+        "gemini-3.1-flash-image-preview"
       ],
-      "default": "gemini-2.0-flash-exp"
+      "default": "gemini-3-flash-preview"
     },
     "max_tokens": {
       "type": "integer",
@@ -202,7 +205,16 @@ This practical example shows how the function can be used to automate the proces
     },
     "temperature": {
       "type": "number",
-      "default": 0.2
+      "description": "Optional generation temperature (default 1.0 recommended for Gemini 3)",
+      "default": 1.0
+    },
+    "thinkingLevel": {
+      "type": "string",
+      "description": "Thinking level for Gemini 3 (minimal, low, medium, high)"
+    },
+    "mediaResolution": {
+      "type": "string",
+      "description": "Media resolution for vision tasks (media_resolution_low, media_resolution_medium, media_resolution_high, media_resolution_ultra_high)"
     },
     "user_message": {
       "type": "string",
@@ -263,6 +275,10 @@ This practical example shows how the function can be used to automate the proces
       "type": "string",
       "description": "The text output extracted from the Gemini response"
     },
+    "thoughtSignature": {
+      "type": "string",
+      "description": "Encrypted representation of the model's internal thought process (Gemini 3)"
+    },
     "finishReason": {
       "type": "string",
       "description": "The reason Gemini finished generating content"
@@ -311,11 +327,12 @@ To process the most recent customer media file from a conversation:
 ```json
 {
   "provider": "Google",
-  "model": "gemini-2.0-flash-exp",
+  "model": "gemini-3-flash-preview",
   "processLastConversationFile": true,
   "conversationId": "12345678-abcd-1234-efgh-1234567890ab",
   "user_message": "What is this document about?",
-  "temperature": 0.3,
+  "temperature": 1.0,
+  "thinkingLevel": "low",
   "max_tokens": 2048
 }
 ```
@@ -325,11 +342,11 @@ To process a file from a provided URL:
 ```json
 {
   "provider": "Google",
-  "model": "gemini-2.0-flash-exp",
+  "model": "gemini-3-flash-preview",
   "processLastConversationFile": false,
   "pdfDownloadUrl": "https://example.com/sample.pdf",
   "user_message": "Summarize this document",
-  "temperature": 0.3,
+  "temperature": 1.0,
   "max_tokens": 2048
 }
 ```
@@ -339,14 +356,15 @@ To request a structured JSON response:
 ```json
 {
   "provider": "Google",
-  "model": "gemini-2.0-flash-exp",
+  "model": "gemini-3-flash-preview",
   "processLastConversationFile": true,
   "conversationId": "12345678-abcd-1234-efgh-1234567890ab",
   "user_message": "Extract the invoice total and date from this document",
   "system_message": "Return a structured JSON with the exact format specified in the schema",
   "isJsonResponse": true,
-  "responseSchema": "{"type": "OBJECT", "properties": {"invoiceTotal": {"type": "NUMBER"}, "invoiceDate": {"type": "STRING"}}}",
-  "temperature": 0.2,
+  "responseSchema": "{\"type\": \"OBJECT\", \"properties\": {\"invoiceTotal\": {\"type\": \"NUMBER\"}, \"invoiceDate\": {\"type\": \"STRING\"}}}",
+  "temperature": 1.0,
+  "thinkingLevel": "minimal",
   "max_tokens": 2048
 }
 ```
